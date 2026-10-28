@@ -10,35 +10,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev      # Start development server
 npm run build    # Production build
 npm run start    # Start production server
-npm run lint     # Run ESLint
+npm run lint     # Run ESLint (flat config, eslint.config.mjs)
 ```
 
-There are no automated tests in this project.
+`npm run build` passes (it type-checks). `npm run lint` currently fails with ~15 errors in `app/page.tsx`, mostly `no-explicit-any` and `prefer-const`, plus `react-hooks/set-state-in-effect` for the `?rx=` load effect — so lint noise is pre-existing; don't treat it as caused by your change.
+
+There are no automated tests in this project (no test runner, no single-test command). README.md is a one-line placeholder.
 
 ## Architecture
 
-This is a **single-page Next.js 16 app** (App Router) targeting multilingual pharmacy dispensing workflows. The entire application logic lives in two files:
+**Single-page Next.js 16 app** (App Router, React 19, Tailwind v4, TypeScript) for pharmacists dispensing to foreign-language patients. There is no backend and no API routes; everything runs client-side. Most logic lives in one file:
 
-- [`app/page.tsx`](app/page.tsx) — The entire app: ~1220 lines, all client-side (`'use client'`). Contains all React state, UI rendering, and helper functions inline.
-- [`app/specialData.ts`](app/specialData.ts) — Canonical specialty medication usage guides (MDI inhaler, insulin pen) with per-language step descriptions. Imported by `page.tsx`.
+- [`app/page.tsx`](app/page.tsx) — ~1240 lines, `'use client'`. Holds the UI strings (`dict`, `unitDict`), types, all React state, helpers, and the render tree. A `<style dangerouslySetInnerHTML>` block near the end (~line 1196) defines the `print-*` classes and `@media print` rules — they are **not** in `globals.css`.
+- [`app/drugData.ts`](app/drugData.ts) — curated, verified drug-name translations (`findDrug()`: exact alias match, then prefix match for queries ≥3 chars). Aliases cover Thai, English and brand names.
+- [`app/specialData.ts`](app/specialData.ts) — step-by-step usage guides (`inhaler_mdi`, `insulin_pen`) with per-language text. the `inhaler_mdi` title only has th/en/fr (other languages fall back to `en` via `guide.title[patientLang] || guide.title.en`); its steps cover all languages.
+- [`app/globals.css`](app/globals.css) — only Tailwind import + theme vars. Tailwind is wired via `@tailwindcss/postcss` in `postcss.config.mjs`; there is no `tailwind.config.*`.
 
 ### Key concepts
 
-**Language system**: The `dict` object in `page.tsx` maps 7 language codes (`th`, `en`, `de`, `zh`, `ja`, `ru`, `ar`) to full UI string translations. The `patientLang` state (type `Lang`) drives all displayed text via `p = dict[patientLang]`. Arabic (`ar`) triggers RTL layout via `isRTL`.
+**Two-sided screen**: the pharmacist side is Thai (`th = dict.th`); the patient side uses `patientLang` (`p = dict[patientLang]`). The patient panel is rendered `rotate-180` so it faces the patient across the counter; `print-rotate-0` / `isSharedLink` undo the rotation for printing and shared links. `ar` sets `isRTL`.
 
-**App modes**: Three tabs controlled by `appMode: 'history' | 'dispense' | 'specialty'`.
-- `history` — Pharmacist asks pre-set questions (name, DOB, allergies, injections) in the patient's language, with TTS playback.
-- `dispense` — Pharmacist builds prescriptions. Has two sub-states: `input` (form) and `present` (fullscreen boarding pass). Prescriptions queue in a `cart: Prescription[]`.
-- `specialty` — Displays step-by-step usage guides from `specialData`.
+**Languages**: `dict` has 8 keys (`th`, `en`, `de`, `fr`, `zh`, `ja`, `ru`, `ar`); `LANGUAGES` (the picker) omits `th`. Adding a language means touching `dict`, `unitDict`, `drugData`'s `DrugLang` + every entry's `names`, `specialData`, `exactLangMap` (TTS) and the Google Translate `langMap` (it appears in several functions — `zh` maps to `zh-CN`).
 
-**Prescription / Boarding Pass**: The `Prescription` type captures drug name, indication, dose, frequency, timing, warnings, tapering schedule, and smart-dose numeric overrides. `renderBoardingPass()` generates a printable "boarding pass" card. Supports both standard and tapering (`isTapering`) dosing modes.
+**Dict indexing**: dose/frequency/time/period/warning/indication options are arrays in `dict`, and a `Prescription` stores **indexes** into them (`rxDose`, `rxFreq`, `rxWarnings`, …), not text. The arrays must stay the same length and order across all languages, and the icon arrays (`ind_icons`, `warn_icons`, …) are parallel to them.
 
-**External APIs** (called directly from the client, no API routes):
-- `translate.googleapis.com` — Drug name, indication, and custom warning translation from Thai to target language.
-- `is.gd` — URL shortener for generating shareable prescription links. Prescription data is base64-encoded into the `?rx=` query param.
+**App modes**: `appMode: 'history' | 'dispense' | 'specialty'`. `dispense` has sub-state `dispenseState: 'input' | 'present'` (form vs. fullscreen "boarding pass"). Prescriptions accumulate in `cart: Prescription[]`; `showBoardingPass()` auto-adds the in-progress form. Dosing is either standard fields plus "smart dose" numeric overrides (`cDose`/`cHour`/`cApply`/`cDays` + unit keys from `unitDict`) or tapering (`isTapering` + `taperSteps`).
 
-**TTS**: Uses the browser's `SpeechSynthesis` API. Voice selection prefers premium/Siri voices and respects the `voiceGender` toggle. Language codes map to BCP-47 tags via `exactLangMap`.
+**Drug-name safety**: `translateDrugName()` tries the curated `drugData` first (`drugVerified = true`, shown ✅ to the pharmacist); only on a miss does it fall back to Google Translate (`drugVerified = false`, shown ⚠️ "unverified"). Indications and custom warnings only have the machine-translation path.
 
-**PWA**: Configured as an installable PWA via `/public/manifest.json` and Apple meta tags in `app/layout.tsx`.
+**Speech**: `generateSpeechText` / `generateWarningsSpeechText` build the spoken text; `speakText` picks a browser `SpeechSynthesis` voice by language and `voiceGender`. For tapering prescriptions the spoken text is just "Complex Tapering Dosing." — the schedule itself is not read aloud.
 
-**Tailwind v4**: Uses `@tailwindcss/postcss` plugin. No `tailwind.config.*` file — configuration is in `postcss.config.mjs`. Extensive use of print-specific utility classes (prefixed `print-`) defined in `app/globals.css`.
+**External calls** (direct from the client):
+- `translate.googleapis.com/translate_a/single?client=gtx` — unofficial endpoint, Thai → patient language, all calls go through `translateFromThai()` (6s timeout, joins all returned segments); failures are only `console.error`'d.
+- `is.gd/create.php` — shortens the share link; the whole cart + language is base64-encoded into the `?rx=` query param (`encodeData` / `decodeData`), and on load a valid `rx` param opens the boarding pass directly in `isSharedLink` mode.
+
+**iPhone / PWA**: the only manifest is `app/manifest.ts` (served as `/manifest.webmanifest`); icons and the iOS `apple-mobile-web-app-*` tags come from `metadata` in `app/layout.tsx`, icon file is `public/apple-touch-iconv2.png`. `viewportFit: "cover"` plus `black-translucent` status bar means the page draws under the Dynamic Island, so top/bottom spacing must use `env(safe-area-inset-*)` (`.safe-top`, `.safe-bottom`, `.pb-safe` in `globals.css`, inline paddings on the root and fullscreen containers). Put any CSS the language picker needs in `globals.css`: the picker returns early, before `page.tsx`'s inline `<style>` renders. Safe-area insets are 0 in desktop browsers, so they can only be confirmed on a real iPhone or simulator.

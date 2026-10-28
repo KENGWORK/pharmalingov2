@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -7,29 +7,31 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-// 🛠️ ตั้งค่า Viewport ป้องกันการซูม (Input 16px) และกำหนดสีธีมแอป
+// viewportFit "cover" lets the page draw under the Dynamic Island / home indicator;
+// page.tsx pads with env(safe-area-inset-*). Zoom stays off so inputs don't jump.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: "cover",
   themeColor: "#0f172a",
 };
 
-// 🛠️ ตั้งค่า Metadata พื้นฐาน
 export const metadata: Metadata = {
   title: "Pharma Lingo",
   description: "Assistance Dispenser App",
+  icons: {
+    icon: "/apple-touch-iconv2.png",
+    apple: "/apple-touch-iconv2.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
     title: "Pharma Lingo",
   },
+  // Next only emits the unprefixed mobile-web-app-capable; iOS home-screen apps still read the apple- one.
+  other: { "apple-mobile-web-app-capable": "yes" },
 };
 
 export default function RootLayout({
@@ -38,19 +40,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <head>
-        {/* 👇 1. บังคับ iPhone เรียกใช้ไอคอนจาก public/apple-touch-icon.png 👇 */}
-        <link rel="apple-touch-iconv2" href="/apple-touch-iconv2.png" />
-        
-        {/* 👇 2. เชื่อมต่อไฟล์ manifest.json จาก public 👇 */}
-        <link rel="manifest" href="/manifest.json" />
-        
-        {/* 👇 3. แท็กเสริมความชัวร์สำหรับ iOS PWA 👇 */}
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <link rel="icon" href="/apple-touch-iconv2.png" />
-      </head>
+    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col overscroll-none">
         {children}
       </body>

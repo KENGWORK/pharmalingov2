@@ -96,6 +96,19 @@ const LANGUAGES = [
   { code: 'ar', flag: '🇦🇪', label: 'UAE' },
 ];
 
+const GT_LANG: Record<string, string> = { th: 'th', en: 'en', de: 'de', fr: 'fr', zh: 'zh-CN', ja: 'ja', ru: 'ru', ar: 'ar' };
+
+// Thai -> patient language via the unofficial Google endpoint. Joins every returned
+// segment (multi-sentence input comes back split) and gives up after 6s instead of hanging.
+const translateFromThai = async (text: string, lang: string): Promise<string> => {
+  const res = await fetch(
+    "https://translate.googleapis.com/translate_a/single?client=gtx&sl=th&tl=" + GT_LANG[lang] + "&dt=t&q=" + encodeURIComponent(text),
+    { signal: AbortSignal.timeout(6000) }
+  );
+  const data = await res.json();
+  return (data[0] as [string][]).map(seg => seg[0]).join('');
+};
+
 const encodeData = (data: any) => {
     return btoa(unescape(encodeURIComponent(JSON.stringify(data))));
 };
@@ -311,14 +324,11 @@ export default function PharmaLingoApp() {
     if (!customText.trim()) return;
     setIsTranslating(true);
     try {
-      const langMap: any = { th: 'th', en: 'en', de: 'de', fr: 'fr', zh: 'zh-CN', ja: 'ja', ru: 'ru', ar: 'ar' };
-      const targetLang = langMap[patientLang];
-      const res = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=th&tl=" + targetLang + "&dt=t&q=" + encodeURIComponent(customText));
-      const data = await res.json(); 
-      setTranslatedText(data[0][0][0]); 
-      setActiveQuestion('custom_msg'); 
-      setAppMode('history'); 
-      speakText(data[0][0][0], patientLang); 
+      const translated = await translateFromThai(customText, patientLang);
+      setTranslatedText(translated);
+      setActiveQuestion('custom_msg');
+      setAppMode('history');
+      speakText(translated, patientLang);
       setCustomText('');
     } catch (error) { console.error(error); }
     setIsTranslating(false);
@@ -364,7 +374,7 @@ export default function PharmaLingoApp() {
     setPatientLang(code as Lang); 
     setAnimatingLang(code); 
     speakText(label, 'en', true);
-    setTimeout(() => { setHasStarted(true); setAnimatingLang(null); }, 1000); 
+    setTimeout(() => { setHasStarted(true); setAnimatingLang(null); }, 550);
   };
 
   const askQuestion = (qId: string) => { 
@@ -393,10 +403,7 @@ export default function PharmaLingoApp() {
     setIsTranslatingDrug(true);
     setDrugVerified(false);
     try {
-      const langMap: any = { th: 'th', en: 'en', de: 'de', fr: 'fr', zh: 'zh-CN', ja: 'ja', ru: 'ru', ar: 'ar' };
-      const targetLang = langMap[patientLang];
-      const res = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=th&tl=" + targetLang + "&dt=t&q=" + encodeURIComponent(drugInput));
-      const data = await res.json(); setDrugName(data[0][0][0]);
+      setDrugName(await translateFromThai(drugInput, patientLang));
     } catch (error) { console.error(error); }
     setIsTranslatingDrug(false);
   };
@@ -405,10 +412,9 @@ export default function PharmaLingoApp() {
     if (!indInput.trim()) return;
     setIsTranslatingInd(true);
     try {
-      const langMap: any = { th: 'th', en: 'en', de: 'de', fr: 'fr', zh: 'zh-CN', ja: 'ja', ru: 'ru', ar: 'ar' };
-      const targetLang = langMap[patientLang];
-      const res = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=th&tl=" + targetLang + "&dt=t&q=" + encodeURIComponent(indInput));
-      const data = await res.json(); setCustomIndication(data[0][0][0]); setIndInput(''); setRxIndication(null); 
+      setCustomIndication(await translateFromThai(indInput, patientLang));
+      setIndInput('');
+      setRxIndication(null);
     } catch (error) { console.error(error); }
     setIsTranslatingInd(false);
   };
@@ -417,10 +423,9 @@ export default function PharmaLingoApp() {
     if (!warnInput.trim()) return;
     setIsTranslatingWarn(true);
     try {
-      const langMap: any = { th: 'th', en: 'en', de: 'de', fr: 'fr', zh: 'zh-CN', ja: 'ja', ru: 'ru', ar: 'ar' };
-      const targetLang = langMap[patientLang];
-      const res = await fetch("https://translate.googleapis.com/translate_a/single?client=gtx&sl=th&tl=" + targetLang + "&dt=t&q=" + encodeURIComponent(warnInput));
-      const data = await res.json(); setCustomWarnings([...customWarnings, data[0][0][0]]); setWarnInput('');
+      const translated = await translateFromThai(warnInput, patientLang);
+      setCustomWarnings([...customWarnings, translated]);
+      setWarnInput('');
     } catch (error) { console.error(error); }
     setIsTranslatingWarn(false);
   };
@@ -500,7 +505,7 @@ export default function PharmaLingoApp() {
   if (!hasStarted) {
     return (
       <div className="min-h-[100dvh] w-full bg-[#0f172a] flex flex-col items-center justify-center relative overflow-hidden font-sans">
-        <div className={"absolute top-10 md:top-20 text-center z-20 transition-opacity duration-300 " + (animatingLang ? "opacity-0" : "opacity-100")}>
+        <div className={"absolute safe-top text-center z-20 transition-opacity duration-300 " + (animatingLang ? "opacity-0" : "opacity-100")}>
           <h1 className="text-3xl md:text-5xl font-black text-white tracking-widest drop-shadow-md">ASSISTANCE DISPENSER</h1>
           <p className="text-slate-400 mt-2 text-sm md:text-base font-bold tracking-widest uppercase">Tap to Select Patient Language</p>
         </div>
@@ -513,11 +518,11 @@ export default function PharmaLingoApp() {
             const isOther = animatingLang && animatingLang !== l.code;
             return (
               <button key={l.code} onClick={() => handleLangSelect(l.code, l.label)}
-                className={"absolute top-1/2 left-1/2 w-20 h-20 -ml-10 -mt-10 flex flex-col items-center justify-center outline-none transition-all duration-[800ms] ease-[cubic-bezier(0.8,0,0.2,1)] " + (isOther ? "opacity-0 scale-0 " : " ") + (isAnimating ? "z-50" : "z-10 hover:scale-110 cursor-pointer")}
+                className={"absolute top-1/2 left-1/2 w-20 h-20 -ml-10 -mt-10 flex flex-col items-center justify-center outline-none transition-all duration-[500ms] ease-[cubic-bezier(0.8,0,0.2,1)] " + (isOther ? "opacity-0 scale-0 " : " ") + (isAnimating ? "z-50" : "z-10 hover:scale-110 cursor-pointer")}
                 style={isAnimating ? { transform: 'translate(0px, 0px) scale(80)' } : { transform: "rotate(" + rotation + "deg) translateY(-150px)" }}
               >
                 <div className={"flex flex-col items-center justify-center w-full h-full rounded-full transition-all duration-300 " + (isAnimating ? "bg-slate-50" : "")} style={{ transform: "rotate(" + (-rotation) + "deg)" }}>
-                  <div className={"transition-all duration-[800ms] " + (isAnimating ? "text-[1px] opacity-0" : "text-5xl")}>{l.flag}</div>
+                  <div className={"transition-all duration-[500ms] " + (isAnimating ? "text-[1px] opacity-0" : "text-5xl")}>{l.flag}</div>
                   <span className={"mt-2 font-black text-[10px] md:text-xs bg-slate-900/80 px-3 py-1 rounded-md border text-slate-300 border-slate-700 whitespace-nowrap " + (isAnimating ? "opacity-0" : "opacity-100")}>{l.label}</span>
                 </div>
               </button>
@@ -525,7 +530,7 @@ export default function PharmaLingoApp() {
           })}
         </div>
         
-        <div className={"absolute bottom-10 z-20 flex gap-4 transition-opacity duration-300 " + (animatingLang ? "opacity-0" : "opacity-100")}>
+        <div className={"absolute safe-bottom z-20 flex gap-4 transition-opacity duration-300 " + (animatingLang ? "opacity-0" : "opacity-100")}>
             <button onClick={() => setVoiceGender('female')} className={"px-6 py-3 rounded-full font-black text-sm md:text-base transition-colors duration-100 border-2 " + (voiceGender === 'female' ? "bg-pink-600 text-white border-pink-400 shadow-[0_0_15px_rgba(219,39,119,0.5)]" : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700")}>👩🏻 Female Voice</button>
             <button onClick={() => setVoiceGender('male')} className={"px-6 py-3 rounded-full font-black text-sm md:text-base transition-colors duration-100 border-2 " + (voiceGender === 'male' ? "bg-blue-600 text-white border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.5)]" : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700")}>👨🏻 Male Voice</button>
         </div>
@@ -604,7 +609,7 @@ export default function PharmaLingoApp() {
         <div className="w-full h-full flex flex-col snap-y snap-mandatory print-rx-layout">
             
           {/* Blue Card */}
-          <div className="w-full h-full min-h-[100dvh] flex items-center justify-center p-4 snap-center print-p-0 print-min-h-0 print-block print-h-full print-w-full print-half print-card-wrapper">
+          <div className="w-full h-full min-h-full flex items-center justify-center p-4 snap-center print-p-0 print-min-h-0 print-block print-h-full print-w-full print-half print-card-wrapper">
             <div className="w-full max-w-md md:max-w-xl lg:max-w-2xl h-full max-h-[85dvh] flex flex-col bg-white rounded-[2rem] shadow-2xl border-2 border-blue-100 overflow-hidden print-max-h-full print-w-full print-break-inside-avoid print-border-2 print-border-blue-900 print-rounded-2xl print-h-full print-shadow-none print-rx-card">
               
               <div className="bg-gradient-to-r from-blue-900 to-indigo-900 p-4 md:p-6 text-center relative shrink-0 flex justify-between items-center shadow-inner print-bg-blue print-header print-p-2">
@@ -723,7 +728,7 @@ export default function PharmaLingoApp() {
           </div>
 
           {/* Red Card */}
-          <div className="w-full h-full min-h-[100dvh] flex items-center justify-center p-4 snap-center print-p-0 print-min-h-0 print-block print-h-full print-w-full print-half print-card-wrapper">
+          <div className="w-full h-full min-h-full flex items-center justify-center p-4 snap-center print-p-0 print-min-h-0 print-block print-h-full print-w-full print-half print-card-wrapper">
             <div className="w-full max-w-md md:max-w-xl lg:max-w-2xl h-full max-h-[85dvh] flex flex-col bg-white rounded-[2rem] shadow-2xl border-2 border-red-200 overflow-hidden print-max-h-full print-w-full print-break-inside-avoid print-border-2 print-border-red-900 print-rounded-2xl print-h-full print-shadow-none print-rx-card">
               
               <div className="bg-gradient-to-r from-red-800 to-rose-900 p-4 md:p-6 text-center relative shrink-0 flex justify-between items-center shadow-inner print-bg-red print-header print-p-2">
@@ -776,14 +781,15 @@ export default function PharmaLingoApp() {
   };
 
   return (
-    <div id="main-print-container" className="h-[100dvh] w-full bg-[#0f172a] font-sans flex flex-col overflow-hidden relative print-h-auto print-overflow-visible">
-      
-      {/* Patient View Area */}
-      <div className={`w-full flex justify-center items-center transition-all duration-700 ease-[cubic-bezier(0.2,0.8,0.2,1)] print-rotate-0 print-block print-bg-white ${isSharedLink ? 'rotate-0 ' : 'rotate-180 '} ${isFullscreen ? 'fixed inset-0 z-[100] bg-slate-900 h-full print-relative print-bg-white print-z-0' : 'bg-slate-100 ' + patientHeightClass}`}>
+    <div id="main-print-container" style={{ paddingTop: 'env(safe-area-inset-top)' }} className="h-[100dvh] w-full bg-[#0f172a] font-sans flex flex-col overflow-hidden relative print-h-auto print-overflow-visible">
+
+      {/* Patient View Area. Fullscreen: the view is rotated 180° unless it's a shared link, so pad both
+          ends with the (larger) top inset to keep the Dynamic Island clear whichever way up it is. */}
+      <div style={isFullscreen ? { paddingTop: 'env(safe-area-inset-top)', paddingBottom: isSharedLink ? 'env(safe-area-inset-bottom)' : 'env(safe-area-inset-top)' } : undefined} className={`w-full flex justify-center items-center transition-[height] duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] print-rotate-0 print-block print-bg-white ${isSharedLink ? 'rotate-0 ' : 'rotate-180 '} ${isFullscreen ? 'fixed inset-0 z-[100] bg-slate-900 h-full print-relative print-bg-white print-z-0' : 'bg-slate-100 ' + patientHeightClass}`}>
         
         {dispenseState === 'present' && !activeGuide ? (
           <div className="w-full h-full flex flex-col bg-slate-900 relative print-bg-white print-h-auto print-block print-w-full print-mx-auto" dir={isRTL ? 'rtl' : 'ltr'}>
-            <div className="absolute top-6 left-6 bg-blue-600 text-white font-black px-4 py-2 md:px-5 md:py-3 rounded-full shadow-xl border-2 border-blue-400 animate-pulse flex items-center gap-2 z-50 print-hidden pointer-events-auto">
+            <div className="absolute top-6 left-6 bg-blue-600 text-white font-black px-4 py-2 md:px-5 md:py-3 rounded-full shadow-xl border-2 border-blue-400 flex items-center gap-2 z-50 print-hidden pointer-events-auto">
                <span className="text-xl md:text-2xl">📸</span> <span className="text-[10px] md:text-sm">{p.photo_prompt}</span>
             </div>
             <div className="absolute top-6 right-6 flex items-center gap-2 z-50 pointer-events-none print-hidden">
@@ -796,7 +802,7 @@ export default function PharmaLingoApp() {
               </div>
             )}
             <div className="flex-1 w-full h-full relative print-h-auto print-overflow-visible">
-               {cart.length > 1 && <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest animate-bounce z-50 pointer-events-none bg-slate-900/80 px-6 py-2 rounded-full border border-slate-700 print-hidden">{p.swipe_hint}</div>}
+               {cart.length > 1 && <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest z-50 pointer-events-none bg-slate-900/80 px-6 py-2 rounded-full border border-slate-700 print-hidden">{p.swipe_hint}</div>}
                <div id="horizontal-scroll-container" className="w-full h-full overflow-x-auto overflow-y-hidden snap-x snap-mandatory flex hide-scrollbar scroll-smooth transform-gpu print-flex-col print-overflow-visible print-h-auto print-snap-none" style={{ WebkitOverflowScrolling: 'touch' }}>
                    {cart.length > 0 ? (
                      cart.map((rx, idx) => renderBoardingPass(rx, idx))
@@ -1194,9 +1200,6 @@ export default function PharmaLingoApp() {
 
       {/* Print CSS - Structure and Layout */}
       <style dangerouslySetInnerHTML={{ __html: `
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@700;900&display=swap'); 
-        .font-arabic { font-family: 'Noto Sans Arabic', sans-serif !important; } 
-        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 24px); } 
         .animate-in { animation: popIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; } 
         .fade-in { animation: fadeIn 0.3s ease-in-out forwards; } 
         @keyframes popIn { from { opacity: 0; transform: translateY(15px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } } 
