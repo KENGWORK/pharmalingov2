@@ -101,3 +101,9 @@ export const findDrug = (input: string): DrugEntry | null => {
   }
   return null;
 };
+
+// Curated name of the drug in the patient's language, or null if the input isn't in the curated DB.
+export const verifiedName = (input: string, lang: string): string | null => {
+  const match = findDrug(input);
+  return match ? match.names[lang as DrugLang] || match.names.en : null;
+};
