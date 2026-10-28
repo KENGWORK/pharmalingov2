@@ -3,7 +3,7 @@ import { isDecimal, isInteger } from '../utils';
 type ChipRowProps = {
   label?: string;
   items: string[];
-  icon: string | string[] | ((i: number) => string);
+  icon?: string | string[] | ((i: number) => string);
   isOn: (i: number) => boolean;
   onPick: (i: number) => void;
   tone: string; // classes for a selected chip

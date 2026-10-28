@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Lang, LANGUAGES, Prescription, Strings, emptyRx, strings } from './dict';
 import { specialData } from './specialData';
 import { primeVoices, speak, stopSpeech } from './speech';
-import { decodeShare, encodeShare, translateFromThai } from './utils';
+import { decodeShare, encodeShare, shortenUrl, translateFromThai } from './utils';
 import BoardingPass from './components/BoardingPass';
 import DispenseForm from './components/DispenseForm';
 import GuideCard from './components/GuideCard';
@@ -81,15 +81,10 @@ export default function PharmaLingoApp() {
 
   const generatePrintLink = async () => {
     setIsGeneratingLink(true);
+    setShortLink('');
     setShowLinkModal(true);
-    try {
-      const longUrl = window.location.origin + '?rx=' + encodeShare({ cart, lang: patientLang });
-      const res = await fetch('https://is.gd/create.php?format=json&url=' + encodeURIComponent(longUrl));
-      const data = await res.json();
-      setShortLink(data.shorturl ? data.shorturl.replace('https://', '') : 'Error: Link generation failed');
-    } catch {
-      setShortLink('Error: Connection failed');
-    }
+    const longUrl = window.location.origin + '/?rx=' + encodeShare({ cart, lang: patientLang });
+    setShortLink((await shortenUrl(longUrl)) ?? 'Error: Link generation failed');
     setIsGeneratingLink(false);
   };
 
@@ -112,10 +107,8 @@ export default function PharmaLingoApp() {
   // A typed message has no dict entry: its text is whatever was just translated.
   const activeText = (strs: Strings) => (activeQuestion === 'custom_msg' || !activeQuestion ? translatedText : strs[activeQuestion]);
 
-  const toggleHistorySpeech = () => {
-    if (isSpeaking) silence();
-    else say(activeText(p));
-  };
+  // Speaker buttons always (re)start the speech, even while it's still playing.
+  const speakHistory = () => say(activeText(p));
 
   const handleLangSelect = (code: Lang, label: string) => {
     setPatientLang(code);
@@ -134,10 +127,14 @@ export default function PharmaLingoApp() {
 
   const hasDraft = rx.drugInput !== '' || rx.rxIndication !== null || rx.rxDose !== null || rx.isTapering;
 
-  const addToCart = () => { setCart([...cart, rx]); setRx(emptyRx()); };
+  // Starting a fresh prescription also remounts the form (key) so its local UI state (open panels, typed text) resets too.
+  const [formKey, setFormKey] = useState(0);
+  const resetRx = () => { setRx(emptyRx()); setFormKey(k => k + 1); };
+
+  const addToCart = () => { setCart([...cart, rx]); resetRx(); };
 
   const clearAll = () => {
-    setRx(emptyRx());
+    resetRx();
     setCart([]);
     setDispenseState('input');
     setIsFullscreen(false);
@@ -161,7 +158,7 @@ export default function PharmaLingoApp() {
 
   if (!hasStarted) {
     return (
-      <div className="min-h-[100dvh] w-full bg-[#0f172a] flex flex-col items-center justify-center relative overflow-hidden font-sans">
+      <div className="fixed inset-0 bg-[#0f172a] flex flex-col items-center justify-center overflow-hidden font-sans">
         <div className={"absolute safe-top text-center z-20 transition-opacity duration-300 " + (animatingLang ? "opacity-0" : "opacity-100")}>
           <h1 className="text-3xl md:text-5xl font-black text-white tracking-widest drop-shadow-md">ASSISTANCE DISPENSER</h1>
           <p className="text-slate-400 mt-2 text-sm md:text-base font-bold tracking-widest uppercase">Tap to Select Patient Language</p>
@@ -195,9 +192,11 @@ export default function PharmaLingoApp() {
     );
   }
 
-  let patientHeightClass = 'h-[25dvh] p-6 print-hidden';
-  if (appMode === 'history' && activeQuestion) patientHeightClass = 'h-[75dvh] p-6 print-hidden';
-  if (appMode === 'dispense' && dispenseState === 'input') patientHeightClass = 'h-[8dvh] p-2 print-hidden';
+  // Percentages of the root box (which already excludes the top safe area), so the pharmacist
+  // panel always gets what's left. 70% (not 75%) while a question is up keeps its close button visible.
+  let patientHeightClass = 'h-1/4 p-6 print-hidden';
+  if (appMode === 'history' && activeQuestion) patientHeightClass = 'h-[70%] p-6 print-hidden';
+  if (appMode === 'dispense' && dispenseState === 'input') patientHeightClass = 'h-[8%] p-2 print-hidden';
 
   const isYesNo = YES_NO_QUESTIONS.includes(activeQuestion as string);
   const showAnswerCard = (answer: Answer) => {
@@ -212,7 +211,8 @@ export default function PharmaLingoApp() {
   const passes = cart.length > 0 ? cart : [rx];
 
   return (
-    <div id="main-print-container" style={{ paddingTop: 'env(safe-area-inset-top)' }} className="h-[100dvh] w-full bg-[#0f172a] font-sans flex flex-col overflow-hidden relative print-h-auto print-overflow-visible">
+    // fixed inset-0, not h-[100dvh]: on iOS home-screen apps 100dvh comes out ~64pt shorter than the real screen
+    <div id="main-print-container" style={{ paddingTop: 'env(safe-area-inset-top)' }} className="fixed inset-0 bg-[#0f172a] font-sans flex flex-col overflow-hidden print-relative print-h-auto print-overflow-visible">
 
       {/* Patient View Area. Fullscreen: the view is rotated 180° unless it's a shared link, so pad both
           ends with the (larger) top inset to keep the Dynamic Island clear whichever way up it is. */}
@@ -269,8 +269,8 @@ export default function PharmaLingoApp() {
                         <div className="flex items-center justify-center gap-4 mb-4">
                           <h2 className="text-2xl md:text-4xl font-black text-slate-800">{activeQuestion ? p[activeQuestion] : ''}</h2>
                           {activeQuestion && (
-                            <button onClick={toggleHistorySpeech} className={`w-12 h-12 rounded-full text-xl shadow-md flex items-center justify-center border ${isSpeaking ? "bg-blue-600 text-white border-blue-400 animate-pulse" : "bg-slate-100 text-slate-500 border-slate-300"}`}>
-                              {isSpeaking ? '🛑' : '🔊'}
+                            <button onClick={speakHistory} className={`w-12 h-12 rounded-full text-xl shadow-md flex items-center justify-center border ${isSpeaking ? "bg-blue-600 text-white border-blue-400 animate-pulse" : "bg-slate-100 text-slate-500 border-slate-300"}`}>
+                              🔊
                             </button>
                           )}
                         </div>
@@ -327,7 +327,7 @@ export default function PharmaLingoApp() {
                   {isGeneratingLink ? '⏳ รอ...' : '🔗 ลิ้งก์ปริ้นท์'}
                 </button>
               )}
-              <button onClick={() => { setHasStarted(false); setActiveQuestion(null); setRx(emptyRx()); }} className="text-[10px] md:text-xs font-black text-white bg-slate-800 px-3 py-2 md:px-4 md:py-3 rounded-xl border border-slate-700 hover:bg-slate-700 flex items-center gap-1.5">
+              <button onClick={() => { setHasStarted(false); setActiveQuestion(null); resetRx(); }} className="text-[10px] md:text-xs font-black text-white bg-slate-800 px-3 py-2 md:px-4 md:py-3 rounded-xl border border-slate-700 hover:bg-slate-700 flex items-center gap-1.5">
                 <span className="text-base md:text-lg">{LANGUAGES.find(l => l.code === patientLang)?.flag}</span><span className="hidden md:inline">{th.change_lang}</span>
               </button>
             </div>
@@ -340,8 +340,8 @@ export default function PharmaLingoApp() {
                   <div className="flex flex-col items-center justify-center h-full gap-4 animate-in">
                     <div className="text-cyan-400 font-bold text-lg md:text-xl flex items-center gap-3">
                       <span className="text-3xl">🗣️</span> ถาม: {activeText(th)}
-                      <button onClick={toggleHistorySpeech} className={`p-3 rounded-full text-xl shadow-md flex items-center justify-center border active:scale-95 ${isSpeaking ? "bg-indigo-600 text-white border-indigo-400 animate-pulse" : "bg-slate-800 text-slate-300 border-slate-600"}`}>
-                        {isSpeaking ? '🛑' : '🔊'}
+                      <button onClick={speakHistory} className={`p-3 rounded-full text-xl shadow-md flex items-center justify-center border active:scale-95 ${isSpeaking ? "bg-indigo-600 text-white border-indigo-400 animate-pulse" : "bg-slate-800 text-slate-300 border-slate-600"}`}>
+                        🔊
                       </button>
                     </div>
                     <button onClick={() => { setActiveQuestion(null); setBoolAnswer(null); }} className="bg-red-600 text-white font-black py-3 px-8 rounded-full text-base md:text-lg shadow-sm border border-red-400 mt-2 active:scale-95">
@@ -369,7 +369,7 @@ export default function PharmaLingoApp() {
               </div>
             )}
 
-            {appMode === 'dispense' && dispenseState === 'input' && <DispenseForm rx={rx} patch={patch} lang={patientLang} />}
+            {appMode === 'dispense' && dispenseState === 'input' && <DispenseForm key={formKey} rx={rx} patch={patch} lang={patientLang} />}
 
             {appMode === 'specialty' && (
               <div className="flex flex-col gap-6 pb-24 animate-in">
@@ -388,7 +388,7 @@ export default function PharmaLingoApp() {
           </div>
 
           {appMode === 'dispense' && dispenseState === 'input' && (
-            <div className="absolute bottom-0 left-0 w-full p-3 md:p-4 bg-slate-900 border-t border-slate-700 flex flex-col md:flex-row items-center gap-3 z-50">
+            <div className="absolute bottom-0 left-0 w-full p-3 md:p-4 pb-safe bg-slate-900 border-t border-slate-700 flex flex-col md:flex-row items-center gap-3 z-50">
               <button onClick={addToCart} disabled={!rx.drugInput && rx.rxIndication === null} className="w-full md:w-auto bg-slate-800 border border-slate-600 text-white font-black px-6 py-3 md:py-4 rounded-xl disabled:opacity-30 text-xs md:text-sm active:scale-95">
                 {th.add_to_cart}
               </button>
@@ -399,10 +399,12 @@ export default function PharmaLingoApp() {
           )}
 
           {appMode === 'history' && !activeQuestion && (
-            <div className="p-4 md:p-6 border-t border-slate-800 shrink-0 pb-safe bg-[#0f172a] relative z-50">
-              <div className="flex gap-3 items-center">
-                <input type="text" value={customText} onChange={(e) => setCustomText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendCustomMessage()} placeholder="พิมพ์สื่อสารทั่วไป..." className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 outline-none font-bold text-[16px] md:text-sm" />
-                <button onClick={sendCustomMessage} disabled={!customText.trim() || isTranslating} className="bg-cyan-600 text-white font-black px-6 py-3 rounded-xl disabled:opacity-50 text-xs md:text-sm border border-cyan-400/50 active:scale-95">
+            // Floating card pinned to the screen's bottom edge (not the panel, whose height varies on iOS):
+            // 3.6rem = 57.6px, about 1 cm on an iPhone, and always clear of the home indicator
+            <div className="fixed left-3 right-3 md:left-6 md:right-6 z-50 rounded-2xl bg-slate-800 border border-slate-600 p-2 shadow-[0_8px_24px_rgba(0,0,0,0.45)]" style={{ bottom: 'max(3.6rem, calc(env(safe-area-inset-bottom) + 1rem))' }}>
+              <div className="flex gap-2 items-center">
+                <input type="text" value={customText} onChange={(e) => setCustomText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendCustomMessage()} placeholder="พิมพ์สื่อสารทั่วไป..." className="flex-1 min-w-0 bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 outline-none font-bold text-[16px] md:text-sm" />
+                <button onClick={sendCustomMessage} disabled={!customText.trim() || isTranslating} className="bg-cyan-600 text-white font-black px-5 py-3 rounded-xl disabled:opacity-50 text-xs md:text-sm border border-cyan-400/50 active:scale-95">
                   ส่ง 💬
                 </button>
               </div>

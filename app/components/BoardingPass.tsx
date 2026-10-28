@@ -1,6 +1,8 @@
 import { memo } from 'react';
 import { Lang, Prescription, fillTemplate, strings, unitDict } from '../dict';
+import { doseIconKind } from '../sig';
 import { rxSpeechText, warningsSpeechText } from '../speech';
+import DoseIcon from './DoseIcon';
 
 type Props = { rx: Prescription; lang: Lang; isSpeaking: boolean; onSpeak: (text: string) => void };
 
@@ -61,7 +63,7 @@ function BoardingPass({ rx, lang, isSpeaking, onSpeak }: Props) {
                 <p className="text-blue-200 text-xs md:text-sm font-bold mt-0.5 tracking-widest print-text-white">{p.rx_title}</p>
               </div>
               <button onClick={onSpeakRx} className={"w-12 h-12 md:w-14 md:h-14 rounded-full text-xl md:text-2xl shadow-md flex items-center justify-center print-hidden " + (isSpeaking ? "bg-white text-blue-600 animate-pulse" : "bg-blue-800 text-white border border-blue-400 hover:bg-blue-700")}>
-                {isSpeaking ? '🛑' : '🔊'}
+                🔊
               </button>
             </div>
 
@@ -117,7 +119,7 @@ function BoardingPass({ rx, lang, isSpeaking, onSpeak }: Props) {
                 <div className={"flex flex-col " + instGap + ""}>
                   {(rx.rxDose !== null || Number(rx.cDose) > 0) && (
                     <div className={"flex items-center gap-4 bg-white rounded-xl shadow-sm border border-slate-100 " + instPadding + " print-box print-bg-white"}>
-                      <span className={iconSizeClass}>💊</span>
+                      <span className={iconSizeClass}><DoseIcon kind={doseIconKind(rx)} /></span>
                       <div className={"flex flex-wrap items-center gap-2 font-black text-slate-800 " + instTextSize + " leading-tight"}>
                         <span>{rx.rxDose !== null ? p.dose[rx.rxDose] : fillTemplate(p.smart_dose, rx.cDose, rx.cDoseUnit, lang)}</span>
                       </div>
@@ -180,7 +182,7 @@ function BoardingPass({ rx, lang, isSpeaking, onSpeak }: Props) {
                 <p className="text-red-200 text-xs md:text-sm font-bold mt-0.5 tracking-widest print-text-white">{p.warn_title}</p>
               </div>
               <button onClick={onSpeakWarnings} className={"w-12 h-12 md:w-14 md:h-14 rounded-full text-xl md:text-2xl shadow-md flex items-center justify-center print-hidden " + (isSpeaking ? "bg-white text-red-600 animate-pulse" : "bg-red-800 text-white border border-red-400 hover:bg-red-700")}>
-                {isSpeaking ? '🛑' : '🔊'}
+                🔊
               </button>
             </div>
 
